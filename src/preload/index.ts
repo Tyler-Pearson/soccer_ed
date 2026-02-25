@@ -25,7 +25,8 @@ const api: SoccerApi = {
 
   sessions: {
     create: (playerId: string, notes: string) => ipcRenderer.invoke('sessions:create', playerId, notes),
-    list: (playerId: string) => ipcRenderer.invoke('sessions:list', playerId)
+    list: (playerId: string) => ipcRenderer.invoke('sessions:list', playerId),
+    updateNotes: (id: string, notes: string) => ipcRenderer.invoke('sessions:updateNotes', id, notes)
   },
 
   videos: {

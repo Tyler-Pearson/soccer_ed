@@ -125,6 +125,7 @@ export function registerIpc(db: AppDb, appVersion: string): void {
 
   ipcMain.handle('sessions:create', async (_evt, playerId: string, notes: string) => db.sessions.create(playerId, notes ?? ''))
   ipcMain.handle('sessions:list', async (_evt, playerId: string) => db.sessions.list(playerId))
+  ipcMain.handle('sessions:updateNotes', async (_evt, id: string, notes: string) => db.sessions.updateNotes(id, notes ?? ''))
 
   ipcMain.handle('videos:list', async (_evt, input: ListVideosInput) => {
     return db.videos.list(input.playerId, input.skillFilter, input.sortDirection)

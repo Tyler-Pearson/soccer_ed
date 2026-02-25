@@ -32,7 +32,9 @@ export default function App(): JSX.Element {
 
   const [retriageOpen, setRetriageOpen] = useState(false)
   const [retriageDraft, setRetriageDraft] = useState<LabelState | null>(null)
+  const [retriageSessionNotes, setRetriageSessionNotes] = useState('')
   const [deleteVideoOpen, setDeleteVideoOpen] = useState(false)
+  const [videoLoadError, setVideoLoadError] = useState(false)
   const notesRef = useRef<HTMLTextAreaElement>(null)
 
   const [playerModalOpen, setPlayerModalOpen] = useState(false)
@@ -44,12 +46,14 @@ export default function App(): JSX.Element {
   const [skillModalPlayerId, setSkillModalPlayerId] = useState<string | null>(null)
   const [skillNameDraft, setSkillNameDraft] = useState('')
   const skillPromiseResolver = useRef<((id: string | null) => void) | null>(null)
+
   const [libraryModalOpen, setLibraryModalOpen] = useState(false)
   const [libraryConfirm, setLibraryConfirm] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState(false)
-  const [videoLoadError, setVideoLoadError] = useState(false)
 
   const selectedVideo = useMemo(() => videos.find(v => v.id === selectedVideoId) ?? null, [videos, selectedVideoId])
+  const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions])
+  const selectedSession = selectedVideo?.sessionId ? sessionById.get(selectedVideo.sessionId) ?? null : null
 
   async function refreshPlayers(preserveSelection = true): Promise<void> {
     const list = await window.soccerApi.players.list()
@@ -65,21 +69,17 @@ export default function App(): JSX.Element {
     setSkills(list)
   }
 
+  async function refreshSessions(playerId: string): Promise<void> {
+    const list = await window.soccerApi.sessions.list(playerId)
+    setSessions(list)
+  }
+
   async function refreshVideos(playerId: string, filter: SkillFilter, direction: 'asc' | 'desc'): Promise<void> {
-    const list = await window.soccerApi.videos.list({
-      playerId,
-      skillFilter: filter,
-      sortDirection: direction
-    })
+    const list = await window.soccerApi.videos.list({ playerId, skillFilter: filter, sortDirection: direction })
     setVideos(list)
     if (!list.some(v => v.id === selectedVideoId)) {
       setSelectedVideoId(list[0]?.id ?? null)
     }
-  }
-
-  async function refreshSessions(playerId: string): Promise<void> {
-    const list = await window.soccerApi.sessions.list(playerId)
-    setSessions(list)
   }
 
   useEffect(() => {
@@ -110,8 +110,7 @@ export default function App(): JSX.Element {
     if (!name.trim()) return null
     const created = await window.soccerApi.skills.create(playerId, name)
     if (selectedPlayerId === playerId || triagePlayerId === playerId) {
-      const list = await window.soccerApi.skills.list(playerId)
-      setSkills(list)
+      await refreshSkills(playerId)
     }
     return created.id
   }
@@ -144,8 +143,8 @@ export default function App(): JSX.Element {
         sessionId: session.id,
         filePaths: sessionDraft.importPaths
       })
-      const triageSkills = await window.soccerApi.skills.list(sessionDraft.playerId)
-      setSkills(triageSkills)
+
+      await refreshSkills(sessionDraft.playerId)
 
       if (result.skipped.length > 0) {
         const sample = result.skipped.slice(0, 3).map(item => `${item.path}: ${item.reason}`).join('\n')
@@ -183,10 +182,7 @@ export default function App(): JSX.Element {
   async function addPaths(mode: 'files' | 'folder'): Promise<void> {
     const picked = await window.soccerApi.files.pick({ mode })
     if (picked.length === 0) return
-    setSessionDraft(prev => ({
-      ...prev,
-      importPaths: [...new Set([...prev.importPaths, ...picked])]
-    }))
+    setSessionDraft(prev => ({ ...prev, importPaths: [...new Set([...prev.importPaths, ...picked])] }))
   }
 
   async function saveRetriage(): Promise<void> {
@@ -199,6 +195,7 @@ export default function App(): JSX.Element {
         displayName: selectedVideo.displayName,
         recordedAt: selectedVideo.recordedAt
       }
+
     await window.soccerApi.videos.update({
       id: selectedVideo.id,
       skillId: value.skillId,
@@ -207,9 +204,17 @@ export default function App(): JSX.Element {
       displayName: value.displayName,
       recordedAt: value.recordedAt
     })
+
+    if (selectedVideo.sessionId) {
+      await window.soccerApi.sessions.updateNotes(selectedVideo.sessionId, retriageSessionNotes)
+    }
+
     setRetriageOpen(false)
     setRetriageDraft(null)
+    setRetriageSessionNotes('')
+
     if (selectedPlayerId) {
+      await refreshSessions(selectedPlayerId)
       await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
     }
   }
@@ -224,8 +229,7 @@ export default function App(): JSX.Element {
   async function submitAddPlayer(): Promise<void> {
     if (!playerNameDraft.trim()) return
     const created = await window.soccerApi.players.create(playerNameDraft)
-    const list = await window.soccerApi.players.list()
-    setPlayers(list)
+    setPlayers(await window.soccerApi.players.list())
     setSelectedPlayerId(created.id)
     setPlayerModalOpen(false)
     setPlayerNameDraft('')
@@ -251,25 +255,23 @@ export default function App(): JSX.Element {
 
   async function createTransferBackup(): Promise<void> {
     const backupPath = await window.soccerApi.app.createBackup()
-    if (backupPath) {
-      setError(`Backup created:\n${backupPath}`)
-    }
+    if (backupPath) setError(`Backup created:\n${backupPath}`)
   }
 
   async function restoreTransferBackup(): Promise<void> {
     if (!restoreConfirm) return
     const restored = await window.soccerApi.app.restoreBackup()
-    if (restored) {
-      setLibraryRoot(restored.restoredLibraryRoot)
-      if (selectedPlayerId) {
-        await refreshSkills(selectedPlayerId)
-        await refreshSessions(selectedPlayerId)
-        await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
-      }
-      setError(`Restore complete:\nBackup: ${restored.backupPath}\nLibrary: ${restored.restoredLibraryRoot}`)
-      setRestoreConfirm(false)
-      setLibraryModalOpen(false)
+    if (!restored) return
+
+    setLibraryRoot(restored.restoredLibraryRoot)
+    if (selectedPlayerId) {
+      await refreshSkills(selectedPlayerId)
+      await refreshSessions(selectedPlayerId)
+      await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
     }
+    setError(`Restore complete:\nBackup: ${restored.backupPath}\nLibrary: ${restored.restoredLibraryRoot}`)
+    setRestoreConfirm(false)
+    setLibraryModalOpen(false)
   }
 
   async function submitAddSkill(): Promise<void> {
@@ -346,15 +348,12 @@ export default function App(): JSX.Element {
         <aside className="sidebar">
           <div className="sidebar-head">
             <div className="sidebar-head-label">Selected Player</div>
-            <div className="sidebar-head-name">
-              {players.find(player => player.id === selectedPlayerId)?.name ?? 'None'}
-            </div>
+            <div className="sidebar-head-name">{players.find(player => player.id === selectedPlayerId)?.name ?? 'None'}</div>
             <button
               className="btn btn-secondary"
               type="button"
               onClick={() => {
-                const currentName = players.find(player => player.id === selectedPlayerId)?.name ?? ''
-                setRenamePlayerDraft(currentName)
+                setRenamePlayerDraft(players.find(player => player.id === selectedPlayerId)?.name ?? '')
                 setRenamePlayerModalOpen(true)
               }}
               disabled={!selectedPlayerId}
@@ -363,11 +362,8 @@ export default function App(): JSX.Element {
             </button>
             {latestSessionNote ? <div className="session-note">Latest Session Note: {latestSessionNote}</div> : null}
           </div>
-          <button
-            className={`sidebar-item ${skillFilter === 'all' ? 'active' : ''}`}
-            type="button"
-            onClick={() => setSkillFilter('all')}
-          >
+
+          <button className={`sidebar-item ${skillFilter === 'all' ? 'active' : ''}`} type="button" onClick={() => setSkillFilter('all')}>
             All Videos
           </button>
           <button
@@ -415,15 +411,13 @@ export default function App(): JSX.Element {
                   <strong>{selectedVideo.displayName}</strong>
                 </div>
                 <div>File: {selectedVideo.originalName}</div>
+                {selectedSession ? <div className="session-tag">Session: {new Date(selectedSession.startedAt).toLocaleString()}</div> : null}
                 <div>{new Date(selectedVideo.recordedAt).toLocaleString()}</div>
                 <div>{selectedVideo.skillName ?? 'Unassigned'}</div>
-                <div className={selectedVideo.notes ? 'video-note-strong' : 'video-note-empty'}>
-                  {selectedVideo.notes || 'No notes'}
-                </div>
+                <div className={selectedVideo.notes ? 'video-note-strong' : 'video-note-empty'}>{selectedVideo.notes || 'No notes'}</div>
+                {selectedSession?.notes ? <div className="session-note">Session Notes: {selectedSession.notes}</div> : null}
                 {videoLoadError ? (
-                  <div className="video-note-error">
-                    Video file could not be loaded. This record may still point to an older storage location.
-                  </div>
+                  <div className="video-note-error">Video file could not be loaded. This record may point to an older storage location.</div>
                 ) : null}
               </div>
               <button
@@ -437,6 +431,7 @@ export default function App(): JSX.Element {
                     displayName: selectedVideo.displayName,
                     recordedAt: selectedVideo.recordedAt
                   })
+                  setRetriageSessionNotes(selectedSession?.notes ?? '')
                   setRetriageOpen(true)
                 }}
               >
@@ -464,25 +459,27 @@ export default function App(): JSX.Element {
           </div>
 
           <div className="video-list">
-            {videos.map(video => (
-              <button
-                key={video.id}
-                type="button"
-                className={`video-row ${video.id === selectedVideoId ? 'active' : ''}`}
-                onClick={() => setSelectedVideoId(video.id)}
-              >
-                <div className="video-icon">▶</div>
-                <div className="video-row-main">
-                  <div className="video-row-title">{video.displayName}</div>
-                  <div className="video-row-meta">{new Date(video.recordedAt).toLocaleString()}</div>
-                  <div className="video-row-meta">{video.originalName}</div>
-                  <div className={video.notes ? 'video-row-notes' : 'video-row-notes-empty'}>
-                    {video.notes || 'No notes'}
+            {videos.map(video => {
+              const session = video.sessionId ? sessionById.get(video.sessionId) : null
+              return (
+                <button
+                  key={video.id}
+                  type="button"
+                  className={`video-row ${video.id === selectedVideoId ? 'active' : ''}`}
+                  onClick={() => setSelectedVideoId(video.id)}
+                >
+                  <div className="video-icon">▶</div>
+                  <div className="video-row-main">
+                    <div className="video-row-title">{video.displayName}</div>
+                    {session ? <div className="video-row-session">Session: {new Date(session.startedAt).toLocaleDateString()}</div> : null}
+                    <div className="video-row-meta">{new Date(video.recordedAt).toLocaleString()}</div>
+                    <div className="video-row-meta">{video.originalName}</div>
+                    <div className={video.notes ? 'video-row-notes' : 'video-row-notes-empty'}>{video.notes || 'No notes'}</div>
                   </div>
-                </div>
-                <div className="video-row-star">{video.starred ? '★' : '☆'}</div>
-              </button>
-            ))}
+                  <div className="video-row-star">{video.starred ? '★' : '☆'}</div>
+                </button>
+              )
+            })}
             {videos.length === 0 && <div className="empty-line">No videos in this view.</div>}
           </div>
         </section>
@@ -494,11 +491,7 @@ export default function App(): JSX.Element {
             <h2>New Session</h2>
             <label className="field">
               <span>Player</span>
-              <select
-                className="select"
-                value={sessionDraft.playerId}
-                onChange={e => setSessionDraft(prev => ({ ...prev, playerId: e.target.value }))}
-              >
+              <select className="select" value={sessionDraft.playerId} onChange={e => setSessionDraft(prev => ({ ...prev, playerId: e.target.value }))}>
                 {players.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -509,12 +502,7 @@ export default function App(): JSX.Element {
 
             <label className="field">
               <span>Session Notes (optional)</span>
-              <textarea
-                className="textarea"
-                rows={3}
-                value={sessionDraft.notes}
-                onChange={e => setSessionDraft(prev => ({ ...prev, notes: e.target.value }))}
-              />
+              <textarea className="textarea" rows={3} value={sessionDraft.notes} onChange={e => setSessionDraft(prev => ({ ...prev, notes: e.target.value }))} />
             </label>
 
             <div className="import-actions">
@@ -583,6 +571,12 @@ export default function App(): JSX.Element {
               }
               onChange={setRetriageDraft}
             />
+            {selectedVideo.sessionId ? (
+              <label className="field">
+                <span>Session Notes</span>
+                <textarea className="textarea" rows={3} value={retriageSessionNotes} onChange={e => setRetriageSessionNotes(e.target.value)} />
+              </label>
+            ) : null}
             <div className="modal-actions">
               <button
                 className="btn btn-secondary"
@@ -590,6 +584,7 @@ export default function App(): JSX.Element {
                 onClick={() => {
                   setRetriageOpen(false)
                   setRetriageDraft(null)
+                  setRetriageSessionNotes('')
                 }}
               >
                 Cancel

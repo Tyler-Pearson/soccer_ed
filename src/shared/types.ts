@@ -97,6 +97,7 @@ export interface SoccerApi {
   sessions: {
     create(playerId: ID, notes: string): Promise<Session>
     list(playerId: ID): Promise<Session[]>
+    updateNotes(id: ID, notes: string): Promise<Session>
   }
   videos: {
     list(input: ListVideosInput): Promise<VideoWithSkillName[]>

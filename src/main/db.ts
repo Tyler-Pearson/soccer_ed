@@ -27,6 +27,7 @@ export interface AppDb {
   sessions: {
     create(playerId: string, notes: string): Session
     list(playerId: string): Session[]
+    updateNotes(id: string, notes: string): Session
   }
   videos: {
     list(playerId: string, skillFilter: 'all' | 'unassigned' | string, sortDirection: 'asc' | 'desc'): VideoWithSkillName[]
@@ -311,6 +312,13 @@ export function createDb(userDataPath: string): AppDb {
       list(playerId: string) {
         const rows = db.prepare('SELECT * FROM sessions WHERE player_id = ? ORDER BY started_at DESC').all(playerId)
         return rows.map(mapSession)
+      },
+
+      updateNotes(id: string, notes: string) {
+        db.prepare('UPDATE sessions SET notes = ? WHERE id = ?').run(notes ?? '', id)
+        const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id)
+        if (!row) throw new Error('Session not found')
+        return mapSession(row)
       }
     },
 

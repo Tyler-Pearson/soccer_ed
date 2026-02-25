@@ -149,6 +149,16 @@ textarea {
   font-size: 12px;
 }
 
+.session-tag {
+  color: #0b3b4f;
+  background: #e7f4f9;
+  border: 1px solid #c9e5f0;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  width: fit-content;
+}
+
 .list-panel {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -207,6 +217,12 @@ textarea {
   color: #a5b3bc;
   font-size: 12px;
   font-style: italic;
+}
+
+.video-row-session {
+  color: #326175;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .btn {
