@@ -23,11 +23,11 @@ jobs:
           - os: windows-latest
             artifact_name: windows-installer
             artifact_glob: dist/*.exe
-            build_cmd: npm run dist:win
+            build_cmd: npm run build && npx electron-builder --win nsis --x64 --publish never
           - os: macos-latest
             artifact_name: macos-dmg
             artifact_glob: dist/*.dmg
-            build_cmd: npm run dist:mac
+            build_cmd: npm run build && npx electron-builder --mac dmg --publish never
 
     runs-on: ${{ matrix.os }}
 
