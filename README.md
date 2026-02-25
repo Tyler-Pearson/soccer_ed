@@ -75,6 +75,26 @@ Produces:
 
 - `dist/*.dmg`
 
+## GitHub Release Automation
+
+- Workflow file: `.github/workflows/release.yml`
+- Trigger:
+  - push tag like `v0.1.0`
+  - or manual run via Actions tab with a tag input
+- Output:
+  - Windows NSIS installer (`.exe`)
+  - macOS DMG (`.dmg`)
+  - both uploaded to a GitHub Release for that tag
+
+### First release
+
+```bash
+git add .
+git commit -m "Prepare v0 release"
+git tag v0.1.0
+git push origin main --tags
+```
+
 ## Cross-platform notes
 
 - Ubuntu can build Windows NSIS installers via `npm run dist` / `npm run dist:win`.
