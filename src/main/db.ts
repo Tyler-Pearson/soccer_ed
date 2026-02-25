@@ -1,0 +1,362 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import Database from 'better-sqlite3'
+import type { Player, Session, Skill, Video, VideoWithSkillName } from '@shared/types'
+import { makeId, nowMs, slugify } from './utils'
+
+export interface AppDb {
+  db: Database.Database
+  init(): void
+  seedDemoIfEmpty(): void
+  getSetting(key: string): string | null
+  setSetting(key: string, value: string): void
+  players: {
+    list(): Player[]
+    create(name: string): Player
+    update(id: string, name: string): Player
+    delete(id: string): void
+  }
+  skills: {
+    list(playerId: string): Skill[]
+    create(playerId: string, name: string): Skill
+    update(id: string, name: string): Skill
+    getById(id: string): Skill | null
+    delete(id: string): void
+  }
+  sessions: {
+    create(playerId: string, notes: string): Session
+    list(playerId: string): Session[]
+  }
+  videos: {
+    list(playerId: string, skillFilter: 'all' | 'unassigned' | string, sortDirection: 'asc' | 'desc'): VideoWithSkillName[]
+    create(row: Video): Video
+    getById(id: string): Video | null
+    update(id: string, patch: Partial<Pick<Video, 'skillId' | 'starred' | 'notes' | 'fileRelpath'>>): Video
+    delete(id: string): void
+  }
+}
+
+function mapPlayer(row: any): Player {
+  return { id: row.id, name: row.name, createdAt: row.created_at }
+}
+
+function mapSkill(row: any): Skill {
+  return {
+    id: row.id,
+    playerId: row.player_id,
+    name: row.name,
+    slug: row.slug,
+    createdAt: row.created_at
+  }
+}
+
+function mapSession(row: any): Session {
+  return {
+    id: row.id,
+    playerId: row.player_id,
+    startedAt: row.started_at,
+    notes: row.notes ?? ''
+  }
+}
+
+function mapVideo(row: any): Video {
+  return {
+    id: row.id,
+    playerId: row.player_id,
+    skillId: row.skill_id,
+    sessionId: row.session_id,
+    fileRelpath: row.file_relpath,
+    originalName: row.original_name,
+    recordedAt: row.recorded_at,
+    importedAt: row.imported_at,
+    starred: row.starred,
+    notes: row.notes ?? '',
+    sortKey: row.sort_key
+  }
+}
+
+export function createDb(userDataPath: string): AppDb {
+  fs.mkdirSync(userDataPath, { recursive: true })
+  const dbPath = path.join(userDataPath, 'soccer-technique.db')
+  const db = new Database(dbPath)
+  db.pragma('journal_mode = WAL')
+
+  const appDb: AppDb = {
+    db,
+    init() {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS players (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS skills (
+          id TEXT PRIMARY KEY,
+          player_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          slug TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          UNIQUE(player_id, slug),
+          FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          player_id TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          notes TEXT,
+          FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS videos (
+          id TEXT PRIMARY KEY,
+          player_id TEXT NOT NULL,
+          skill_id TEXT NULL,
+          session_id TEXT NULL,
+          file_relpath TEXT NOT NULL,
+          original_name TEXT NOT NULL,
+          recorded_at INTEGER NOT NULL,
+          imported_at INTEGER NOT NULL,
+          starred INTEGER NOT NULL DEFAULT 0,
+          notes TEXT,
+          sort_key INTEGER NOT NULL,
+          FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE,
+          FOREIGN KEY(skill_id) REFERENCES skills(id) ON DELETE SET NULL,
+          FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_videos_player_id ON videos(player_id);
+        CREATE INDEX IF NOT EXISTS idx_videos_skill_id ON videos(skill_id);
+        CREATE INDEX IF NOT EXISTS idx_videos_recorded_at ON videos(recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_videos_starred ON videos(starred);
+      `)
+    },
+
+    seedDemoIfEmpty() {
+      const row = db.prepare('SELECT COUNT(*) as count FROM players').get() as { count: number }
+      if (row.count > 0) return
+
+      const player = appDb.players.create('Demo Player')
+      appDb.skills.create(player.id, 'First Touch')
+      appDb.skills.create(player.id, 'Passing')
+    },
+
+    getSetting(key: string) {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined
+      return row?.value ?? null
+    },
+
+    setSetting(key: string, value: string) {
+      db.prepare(`
+        INSERT INTO settings(key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(key, value)
+    },
+
+    players: {
+      list() {
+        const rows = db.prepare('SELECT * FROM players ORDER BY name COLLATE NOCASE ASC').all()
+        return rows.map(mapPlayer)
+      },
+
+      create(name: string) {
+        const id = makeId()
+        const createdAt = nowMs()
+        db.prepare('INSERT INTO players(id, name, created_at) VALUES (?, ?, ?)').run(id, name.trim(), createdAt)
+        return { id, name: name.trim(), createdAt }
+      },
+
+      update(id: string, name: string) {
+        db.prepare('UPDATE players SET name = ? WHERE id = ?').run(name.trim(), id)
+        const row = db.prepare('SELECT * FROM players WHERE id = ?').get(id)
+        if (!row) throw new Error('Player not found')
+        return mapPlayer(row)
+      },
+
+      delete(id: string) {
+        db.prepare('DELETE FROM players WHERE id = ?').run(id)
+      }
+    },
+
+    skills: {
+      list(playerId: string) {
+        const rows = db
+          .prepare('SELECT * FROM skills WHERE player_id = ? ORDER BY name COLLATE NOCASE ASC')
+          .all(playerId)
+        return rows.map(mapSkill)
+      },
+
+      create(playerId: string, name: string) {
+        const trimmed = name.trim()
+        if (!trimmed) throw new Error('Skill name is required')
+
+        const base = slugify(trimmed)
+        let slug = base
+        let suffix = 1
+        while (
+          db.prepare('SELECT 1 FROM skills WHERE player_id = ? AND slug = ?').get(playerId, slug)
+        ) {
+          suffix += 1
+          slug = `${base}-${suffix}`
+        }
+
+        const id = makeId()
+        const createdAt = nowMs()
+        db.prepare('INSERT INTO skills(id, player_id, name, slug, created_at) VALUES (?, ?, ?, ?, ?)').run(
+          id,
+          playerId,
+          trimmed,
+          slug,
+          createdAt
+        )
+        return { id, playerId, name: trimmed, slug, createdAt }
+      },
+
+      update(id: string, name: string) {
+        const current = db.prepare('SELECT * FROM skills WHERE id = ?').get(id) as any
+        if (!current) throw new Error('Skill not found')
+
+        const trimmed = name.trim()
+        if (!trimmed) throw new Error('Skill name is required')
+        const base = slugify(trimmed)
+        let slug = base
+        let suffix = 1
+        while (
+          db
+            .prepare('SELECT 1 FROM skills WHERE player_id = ? AND slug = ? AND id <> ?')
+            .get(current.player_id, slug, id)
+        ) {
+          suffix += 1
+          slug = `${base}-${suffix}`
+        }
+
+        db.prepare('UPDATE skills SET name = ?, slug = ? WHERE id = ?').run(trimmed, slug, id)
+        const row = db.prepare('SELECT * FROM skills WHERE id = ?').get(id)
+        if (!row) throw new Error('Skill not found')
+        return mapSkill(row)
+      },
+
+      getById(id: string) {
+        const row = db.prepare('SELECT * FROM skills WHERE id = ?').get(id)
+        return row ? mapSkill(row) : null
+      },
+
+      delete(id: string) {
+        db.prepare('DELETE FROM skills WHERE id = ?').run(id)
+      }
+    },
+
+    sessions: {
+      create(playerId: string, notes: string) {
+        const id = makeId()
+        const startedAt = nowMs()
+        db.prepare('INSERT INTO sessions(id, player_id, started_at, notes) VALUES (?, ?, ?, ?)').run(
+          id,
+          playerId,
+          startedAt,
+          notes
+        )
+        return { id, playerId, startedAt, notes }
+      },
+
+      list(playerId: string) {
+        const rows = db
+          .prepare('SELECT * FROM sessions WHERE player_id = ? ORDER BY started_at DESC')
+          .all(playerId)
+        return rows.map(mapSession)
+      }
+    },
+
+    videos: {
+      list(playerId: string, skillFilter: 'all' | 'unassigned' | string, sortDirection: 'asc' | 'desc') {
+        const order = sortDirection === 'desc' ? 'DESC' : 'ASC'
+        let query = `
+          SELECT v.*, s.name as skill_name
+          FROM videos v
+          LEFT JOIN skills s ON s.id = v.skill_id
+          WHERE v.player_id = ?
+        `
+        const params: any[] = [playerId]
+
+        if (skillFilter === 'unassigned') {
+          query += ' AND v.skill_id IS NULL'
+        } else if (skillFilter !== 'all') {
+          query += ' AND v.skill_id = ?'
+          params.push(skillFilter)
+        }
+
+        query += ` ORDER BY v.sort_key ${order}, v.imported_at ${order}`
+
+        const rows = db.prepare(query).all(...params)
+        return rows.map((row: any) => ({ ...mapVideo(row), skillName: row.skill_name ?? null }))
+      },
+
+      create(row: Video) {
+        db.prepare(`
+          INSERT INTO videos(
+            id, player_id, skill_id, session_id, file_relpath, original_name,
+            recorded_at, imported_at, starred, notes, sort_key
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          row.id,
+          row.playerId,
+          row.skillId,
+          row.sessionId,
+          row.fileRelpath,
+          row.originalName,
+          row.recordedAt,
+          row.importedAt,
+          row.starred,
+          row.notes,
+          row.sortKey
+        )
+        return row
+      },
+
+      getById(id: string) {
+        const row = db.prepare('SELECT * FROM videos WHERE id = ?').get(id)
+        return row ? mapVideo(row) : null
+      },
+
+      update(id: string, patch: Partial<Pick<Video, 'skillId' | 'starred' | 'notes' | 'fileRelpath'>>) {
+        const current = db.prepare('SELECT * FROM videos WHERE id = ?').get(id) as any
+        if (!current) throw new Error('Video not found')
+
+        const skillId = Object.prototype.hasOwnProperty.call(patch, 'skillId') ? patch.skillId ?? null : current.skill_id
+        const starred = Object.prototype.hasOwnProperty.call(patch, 'starred') ? patch.starred ?? current.starred : current.starred
+        const notes = Object.prototype.hasOwnProperty.call(patch, 'notes') ? patch.notes ?? '' : current.notes ?? ''
+        const fileRelpath =
+          Object.prototype.hasOwnProperty.call(patch, 'fileRelpath') && patch.fileRelpath
+            ? patch.fileRelpath
+            : current.file_relpath
+
+        db.prepare('UPDATE videos SET skill_id = ?, starred = ?, notes = ?, file_relpath = ? WHERE id = ?').run(
+          skillId,
+          starred,
+          notes,
+          fileRelpath,
+          id
+        )
+
+        const row = db.prepare('SELECT * FROM videos WHERE id = ?').get(id)
+        if (!row) throw new Error('Video not found')
+        return mapVideo(row)
+      },
+
+      delete(id: string) {
+        db.prepare('DELETE FROM videos WHERE id = ?').run(id)
+      }
+    }
+  }
+
+  appDb.init()
+  appDb.seedDemoIfEmpty()
+  return appDb
+}
