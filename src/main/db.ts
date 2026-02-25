@@ -160,14 +160,14 @@ export function createDb(userDataPath: string): AppDb {
       }
 
       const missingPlayerKeys = db
-        .prepare('SELECT id, name FROM players WHERE storage_key IS NULL OR storage_key = ""')
+        .prepare("SELECT id, name FROM players WHERE storage_key IS NULL OR storage_key = ''")
         .all() as Array<{ id: string; name: string }>
       const setPlayerKey = db.prepare('UPDATE players SET storage_key = ? WHERE id = ?')
       for (const row of missingPlayerKeys) {
         setPlayerKey.run(makePlayerStorageKey(row.name, row.id), row.id)
       }
 
-      db.exec('UPDATE videos SET display_name = original_name WHERE display_name IS NULL OR display_name = ""')
+      db.exec("UPDATE videos SET display_name = original_name WHERE display_name IS NULL OR display_name = ''")
     },
 
     seedDemoIfEmpty() {
