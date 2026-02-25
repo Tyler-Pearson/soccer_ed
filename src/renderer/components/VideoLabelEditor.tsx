@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { RefObject } from 'react'
 import type { Skill } from '@shared/types'
 
@@ -14,7 +13,7 @@ interface VideoLabelEditorProps {
   skills: Skill[]
   value: LabelState
   onChange: (next: LabelState) => void
-  onCreateSkill: (name: string) => Promise<string | null>
+  onCreateSkill: () => Promise<string | null>
   notesRef?: RefObject<HTMLTextAreaElement>
 }
 
@@ -29,9 +28,6 @@ function toLocalInputValue(timestamp: number): string {
 }
 
 export function VideoLabelEditor({ skills, value, onChange, onCreateSkill, notesRef }: VideoLabelEditorProps): JSX.Element {
-  const [newSkillName, setNewSkillName] = useState('')
-  const [showNewSkill, setShowNewSkill] = useState(false)
-
   const options = [{ id: '__new', name: '+ New Skill...' }, { id: '__unassigned', name: 'Unassigned' }, ...skills.map(s => ({ id: s.id, name: s.name }))]
 
   return (
@@ -68,7 +64,10 @@ export function VideoLabelEditor({ skills, value, onChange, onCreateSkill, notes
           onChange={e => {
             const selected = e.target.value
             if (selected === '__new') {
-              setShowNewSkill(true)
+              void onCreateSkill().then(createdId => {
+                if (!createdId) return
+                onChange({ ...value, skillId: createdId })
+              })
               return
             }
             onChange({ ...value, skillId: selected === '__unassigned' ? null : selected })
@@ -81,41 +80,6 @@ export function VideoLabelEditor({ skills, value, onChange, onCreateSkill, notes
           ))}
         </select>
       </label>
-
-      {showNewSkill && (
-        <div className="inline-create-row">
-          <input
-            className="input"
-            placeholder="New skill name"
-            value={newSkillName}
-            onChange={e => setNewSkillName(e.target.value)}
-          />
-          <button
-            className="btn"
-            type="button"
-            onClick={async () => {
-              if (!newSkillName.trim()) return
-              const createdId = await onCreateSkill(newSkillName)
-              if (!createdId) return
-              onChange({ ...value, skillId: createdId })
-              setShowNewSkill(false)
-              setNewSkillName('')
-            }}
-          >
-            Create
-          </button>
-          <button
-            className="btn btn-secondary"
-            type="button"
-            onClick={() => {
-              setShowNewSkill(false)
-              setNewSkillName('')
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
 
       <label className="field-inline">
         <input

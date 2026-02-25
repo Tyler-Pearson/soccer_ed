@@ -8,7 +8,7 @@ interface TriageModalProps {
   skills: Skill[]
   sessionNotes?: string
   onClose: () => void
-  onCreateSkill: (name: string) => Promise<string | null>
+  onCreateSkill: () => Promise<string | null>
   onSaveAll: (
     updates: Array<{ id: string; skillId: string | null; starred: number; notes: string; displayName: string; recordedAt: number }>
   ) => Promise<void>
@@ -107,7 +107,7 @@ export function TriageModal({
         return
       }
 
-      if (/^[1-9]$/.test(e.key) && selected && value) {
+      if (/^[1-9]$/.test(e.key) && !isTyping && selected && value) {
         const idx = Number(e.key) - 1
         const skillId = skillHotkeyList[idx]
         if (idx >= 0 && idx < skillHotkeyList.length) {

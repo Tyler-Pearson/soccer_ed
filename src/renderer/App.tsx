@@ -540,7 +540,7 @@ export default function App(): JSX.Element {
         importedVideos={triageVideos}
         skills={skills}
         sessionNotes={sessionDraft.notes}
-        onCreateSkill={name => (triagePlayerId ? createSkillForPlayer(triagePlayerId, name) : Promise.resolve(null))}
+        onCreateSkill={() => (triagePlayerId ? requestNewSkill(triagePlayerId) : Promise.resolve(null))}
         onClose={async () => {
           setTriageOpen(false)
           if (selectedPlayerId) {
@@ -559,7 +559,7 @@ export default function App(): JSX.Element {
             <VideoLabelEditor
               skills={skills}
               notesRef={notesRef}
-              onCreateSkill={name => createSkillForPlayer(selectedVideo.playerId, name)}
+              onCreateSkill={() => requestNewSkill(selectedVideo.playerId)}
               value={
                 retriageDraft ?? {
                   skillId: selectedVideo.skillId,

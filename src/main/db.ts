@@ -91,6 +91,7 @@ export function createDb(userDataPath: string): AppDb {
   const dbPath = path.join(userDataPath, 'soccer-technique.db')
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
+  db.pragma('foreign_keys = ON')
 
   const appDb: AppDb = {
     db,
@@ -169,6 +170,17 @@ export function createDb(userDataPath: string): AppDb {
       }
 
       db.exec("UPDATE videos SET display_name = original_name WHERE display_name IS NULL OR display_name = ''")
+      db.exec(`
+        UPDATE videos
+        SET skill_id = NULL
+        WHERE skill_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM skills s
+            WHERE s.id = videos.skill_id
+              AND s.player_id = videos.player_id
+          )
+      `)
     },
 
     seedDemoIfEmpty() {

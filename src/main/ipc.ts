@@ -163,6 +163,9 @@ export function registerIpc(db: AppDb, appVersion: string): void {
     if (changingSkill || changingRecordedAt) {
       const skill = nextSkillId ? db.skills.getById(nextSkillId) : null
       if (nextSkillId && !skill) throw new Error('Skill not found')
+      if (skill && skill.playerId !== current.playerId) {
+        throw new Error('Selected skill belongs to a different player')
+      }
 
       const libraryRoot = getLibraryRootOrThrow(db)
       const fromAbs = resolveAbsVideoPath(libraryRoot, current.fileRelpath)
