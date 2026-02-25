@@ -73,13 +73,13 @@ export function TriageModal({
       const target = e.target as HTMLElement | null
       const isTyping = target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
 
-      if (e.key === 'j' || e.key === 'ArrowDown') {
+      if ((e.key === 'j' || e.key === 'ArrowDown') && !isTyping) {
         e.preventDefault()
         setIndex(i => Math.min(importedVideos.length - 1, i + 1))
         return
       }
 
-      if (e.key === 'k' || e.key === 'ArrowUp') {
+      if ((e.key === 'k' || e.key === 'ArrowUp') && !isTyping) {
         e.preventDefault()
         setIndex(i => Math.max(0, i - 1))
         return
