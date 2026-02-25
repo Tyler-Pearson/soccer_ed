@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Player, Skill, Video, VideoWithSkillName } from '@shared/types'
+import type { Player, Session, Skill, Video, VideoWithSkillName } from '@shared/types'
 import { PlayerPicker } from './components/PlayerPicker'
 import { TriageModal } from './components/TriageModal'
 import { VideoLabelEditor, type LabelState } from './components/VideoLabelEditor'
@@ -19,6 +19,7 @@ export default function App(): JSX.Element {
   const [skills, setSkills] = useState<Skill[]>([])
   const [skillFilter, setSkillFilter] = useState<SkillFilter>('all')
   const [videos, setVideos] = useState<VideoWithSkillName[]>([])
+  const [sessions, setSessions] = useState<Session[]>([])
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [error, setError] = useState<string>('')
@@ -45,6 +46,7 @@ export default function App(): JSX.Element {
   const [libraryModalOpen, setLibraryModalOpen] = useState(false)
   const [libraryConfirm, setLibraryConfirm] = useState(false)
   const [restoreConfirm, setRestoreConfirm] = useState(false)
+  const [videoLoadError, setVideoLoadError] = useState(false)
 
   const selectedVideo = useMemo(() => videos.find(v => v.id === selectedVideoId) ?? null, [videos, selectedVideoId])
 
@@ -74,6 +76,11 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function refreshSessions(playerId: string): Promise<void> {
+    const list = await window.soccerApi.sessions.list(playerId)
+    setSessions(list)
+  }
+
   useEffect(() => {
     const run = async (): Promise<void> => {
       const root = await window.soccerApi.app.getLibraryRoot()
@@ -86,12 +93,17 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (!selectedPlayerId) return
     refreshSkills(selectedPlayerId).catch(err => setError(err.message || 'Failed to load skills'))
+    refreshSessions(selectedPlayerId).catch(err => setError(err.message || 'Failed to load sessions'))
   }, [selectedPlayerId])
 
   useEffect(() => {
     if (!selectedPlayerId) return
     refreshVideos(selectedPlayerId, skillFilter, sortDirection).catch(err => setError(err.message || 'Failed to load videos'))
   }, [selectedPlayerId, skillFilter, sortDirection])
+
+  useEffect(() => {
+    setVideoLoadError(false)
+  }, [selectedVideoId])
 
   async function createSkillForPlayer(playerId: string, name: string): Promise<string | null> {
     if (!name.trim()) return null
@@ -147,6 +159,7 @@ export default function App(): JSX.Element {
       if (sessionDraft.playerId !== selectedPlayerId) {
         setSelectedPlayerId(sessionDraft.playerId)
       } else {
+        await refreshSessions(sessionDraft.playerId)
         await refreshVideos(sessionDraft.playerId, skillFilter, sortDirection)
       }
     } catch (err: any) {
@@ -242,6 +255,7 @@ export default function App(): JSX.Element {
       setLibraryRoot(restored.restoredLibraryRoot)
       if (selectedPlayerId) {
         await refreshSkills(selectedPlayerId)
+        await refreshSessions(selectedPlayerId)
         await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
       }
       setError(`Restore complete:\nBackup: ${restored.backupPath}\nLibrary: ${restored.restoredLibraryRoot}`)
@@ -292,6 +306,8 @@ export default function App(): JSX.Element {
     )
   }
 
+  const latestSessionNote = sessions.find(session => session.notes.trim().length > 0)?.notes ?? ''
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -337,6 +353,7 @@ export default function App(): JSX.Element {
             >
               Rename Player
             </button>
+            {latestSessionNote ? <div className="session-note">Latest Session Note: {latestSessionNote}</div> : null}
           </div>
           <button
             className={`sidebar-item ${skillFilter === 'all' ? 'active' : ''}`}
@@ -378,7 +395,13 @@ export default function App(): JSX.Element {
         <section className="viewer">
           {selectedVideo ? (
             <>
-              <video className="video" controls src={window.soccerApi.videos.sourceUrl(selectedVideo.fileRelpath)} />
+              <video
+                className="video"
+                controls
+                src={window.soccerApi.videos.sourceUrl(selectedVideo.fileRelpath)}
+                onLoadedData={() => setVideoLoadError(false)}
+                onError={() => setVideoLoadError(true)}
+              />
               <div className="video-meta">
                 <div>
                   <strong>{selectedVideo.displayName}</strong>
@@ -386,7 +409,12 @@ export default function App(): JSX.Element {
                 <div>File: {selectedVideo.originalName}</div>
                 <div>{new Date(selectedVideo.recordedAt).toLocaleString()}</div>
                 <div>{selectedVideo.skillName ?? 'Unassigned'}</div>
-                <div>{selectedVideo.notes || 'No notes'}</div>
+                <div className="video-note-strong">{selectedVideo.notes || 'No notes'}</div>
+                {videoLoadError ? (
+                  <div className="video-note-error">
+                    Video file could not be loaded. This record may still point to an older storage location.
+                  </div>
+                ) : null}
               </div>
               <button
                 className="btn"
@@ -508,11 +536,13 @@ export default function App(): JSX.Element {
         open={triageOpen}
         importedVideos={triageVideos}
         skills={skills}
+        sessionNotes={sessionDraft.notes}
         onCreateSkill={name => (triagePlayerId ? createSkillForPlayer(triagePlayerId, name) : Promise.resolve(null))}
         onClose={async () => {
           setTriageOpen(false)
           if (selectedPlayerId) {
             await refreshSkills(selectedPlayerId)
+            await refreshSessions(selectedPlayerId)
             await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
           }
         }}

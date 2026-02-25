@@ -6,6 +6,7 @@ interface TriageModalProps {
   open: boolean
   importedVideos: Video[]
   skills: Skill[]
+  sessionNotes?: string
   onClose: () => void
   onCreateSkill: (name: string) => Promise<string | null>
   onSaveAll: (
@@ -13,7 +14,15 @@ interface TriageModalProps {
   ) => Promise<void>
 }
 
-export function TriageModal({ open, importedVideos, skills, onClose, onCreateSkill, onSaveAll }: TriageModalProps): JSX.Element | null {
+export function TriageModal({
+  open,
+  importedVideos,
+  skills,
+  sessionNotes,
+  onClose,
+  onCreateSkill,
+  onSaveAll
+}: TriageModalProps): JSX.Element | null {
   const [index, setIndex] = useState(0)
   const [lastUsedSkillId, setLastUsedSkillId] = useState<string | null>(null)
   const [edits, setEdits] = useState<Record<string, LabelState>>({})
@@ -130,6 +139,7 @@ export function TriageModal({ open, importedVideos, skills, onClose, onCreateSki
           <h2>Session Triage</h2>
           <div className="triage-progress">Tagged {taggedCount} / {importedVideos.length}</div>
         </div>
+        {sessionNotes?.trim() ? <div className="session-note">Session Note: {sessionNotes.trim()}</div> : null}
 
         <div className="triage-body">
           <div className="triage-list">

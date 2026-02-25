@@ -129,6 +129,20 @@ textarea {
   gap: 4px;
 }
 
+.video-note-strong {
+  color: var(--text);
+  font-weight: 600;
+  background: #eef7fa;
+  border: 1px solid #d5e9ef;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.video-note-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .list-panel {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -175,6 +189,12 @@ textarea {
 .video-row-notes {
   color: var(--muted);
   font-size: 12px;
+}
+
+.video-row-notes {
+  color: #24404f;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .btn {
@@ -317,6 +337,15 @@ textarea {
   color: var(--muted);
 }
 
+.session-note {
+  color: #0b3b4f;
+  background: #e7f4f9;
+  border: 1px solid #c9e5f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
 .triage-body {
   min-height: 0;
   display: grid;
@@ -361,8 +390,18 @@ textarea {
 .triage-panel {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: minmax(180px, 240px) 1fr;
   gap: 10px;
+  overflow: hidden;
+}
+
+.triage-panel .video {
+  max-height: 240px;
+}
+
+.triage-panel .label-editor {
+  overflow: auto;
+  min-height: 0;
 }
 
 .label-editor {
