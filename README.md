@@ -89,7 +89,7 @@ Produces:
 
 ```text
 library/
-  players/{playerId}/
+  players/{playerNameSlug}-{shortid4}/
     skills/{skillSlug|unassigned}/
       {YYYY-MM-DD}/
         {timestamp}_{shortid}.ext
@@ -120,3 +120,18 @@ At first DB initialization, the app creates:
 - Relative video paths are validated to prevent traversal outside library root.
 - Video deletion removes both DB row and file.
 - Skill changes move the video into the new skill folder safely (rename with EXDEV fallback).
+
+## Machine Transfer Backup/Restore
+
+- Open `Storage` in the app header.
+- `Create Backup Bundle`:
+  - choose destination parent folder
+  - app creates a timestamped backup directory containing:
+    - `manifest.json`
+    - SQLite snapshot
+    - full library file copy
+- `Restore From Backup Bundle`:
+  - choose backup folder
+  - choose destination parent for restored library
+  - app restores metadata and library data, then points settings to the restored location
+  - existing data is not deleted automatically

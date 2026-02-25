@@ -3,6 +3,7 @@ export type ID = string
 export interface Player {
   id: ID
   name: string
+  storageKey: string
   createdAt: number
 }
 
@@ -28,6 +29,7 @@ export interface Video {
   sessionId: ID | null
   fileRelpath: string
   originalName: string
+  displayName: string
   recordedAt: number
   importedAt: number
   starred: number
@@ -59,6 +61,8 @@ export interface VideoUpdateInput {
   skillId?: ID | null
   starred?: number
   notes?: string
+  displayName?: string
+  recordedAt?: number
 }
 
 export interface ListVideosInput {
@@ -75,6 +79,8 @@ export interface SoccerApi {
   app: {
     getLibraryRoot(): Promise<string | null>
     chooseLibraryRoot(): Promise<string | null>
+    createBackup(): Promise<string | null>
+    restoreBackup(): Promise<{ restoredLibraryRoot: string; backupPath: string } | null>
   }
   players: {
     list(): Promise<Player[]>

@@ -7,8 +7,10 @@ interface TriageModalProps {
   importedVideos: Video[]
   skills: Skill[]
   onClose: () => void
-  onCreateSkill: () => Promise<string | null>
-  onSaveAll: (updates: Array<{ id: string; skillId: string | null; starred: number; notes: string }>) => Promise<void>
+  onCreateSkill: (name: string) => Promise<string | null>
+  onSaveAll: (
+    updates: Array<{ id: string; skillId: string | null; starred: number; notes: string; displayName: string; recordedAt: number }>
+  ) => Promise<void>
 }
 
 export function TriageModal({ open, importedVideos, skills, onClose, onCreateSkill, onSaveAll }: TriageModalProps): JSX.Element | null {
@@ -36,7 +38,9 @@ export function TriageModal({ open, importedVideos, skills, onClose, onCreateSki
         [selected.id]: {
           skillId: defaultSkillId,
           starred: selected.starred,
-          notes: selected.notes
+          notes: selected.notes,
+          displayName: selected.displayName,
+          recordedAt: selected.recordedAt
         }
       }
     })
@@ -46,7 +50,9 @@ export function TriageModal({ open, importedVideos, skills, onClose, onCreateSki
     ? edits[selected.id] ?? {
         skillId: null,
         starred: selected.starred,
-        notes: selected.notes
+        notes: selected.notes,
+        displayName: selected.displayName,
+        recordedAt: selected.recordedAt
       }
     : null
 
@@ -134,8 +140,9 @@ export function TriageModal({ open, importedVideos, skills, onClose, onCreateSki
                 type="button"
                 onClick={() => setIndex(i)}
               >
-                <span className="triage-name">{video.originalName}</span>
+                <span className="triage-name">{video.displayName}</span>
                 <span className="triage-time">{new Date(video.recordedAt).toLocaleString()}</span>
+                <span className="triage-time">{video.originalName}</span>
               </button>
             ))}
           </div>

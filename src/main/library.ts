@@ -44,7 +44,7 @@ export async function collectImportFiles(paths: string[]): Promise<string[]> {
 }
 
 export function buildVideoRelpath(params: {
-  playerId: string
+  playerFolder: string
   skillSlug: string
   recordedAt: number
   id: string
@@ -53,7 +53,7 @@ export function buildVideoRelpath(params: {
   const day = toDayString(params.recordedAt)
   const ts = String(params.recordedAt)
   const filename = `${ts}_${shortId(params.id)}${params.ext}`
-  const rel = path.posix.join('players', params.playerId, 'skills', params.skillSlug, day, filename)
+  const rel = path.posix.join('players', params.playerFolder, 'skills', params.skillSlug, day, filename)
   return sanitizeRelpath(rel)
 }
 

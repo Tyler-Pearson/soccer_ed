@@ -27,10 +27,24 @@ export default function App(): JSX.Element {
   const [sessionDraft, setSessionDraft] = useState<SessionDraft>({ playerId: '', notes: '', importPaths: [] })
   const [triageOpen, setTriageOpen] = useState(false)
   const [triageVideos, setTriageVideos] = useState<Video[]>([])
+  const [triagePlayerId, setTriagePlayerId] = useState<string | null>(null)
 
   const [retriageOpen, setRetriageOpen] = useState(false)
   const [retriageDraft, setRetriageDraft] = useState<LabelState | null>(null)
   const notesRef = useRef<HTMLTextAreaElement>(null)
+
+  const [playerModalOpen, setPlayerModalOpen] = useState(false)
+  const [playerNameDraft, setPlayerNameDraft] = useState('')
+  const [renamePlayerModalOpen, setRenamePlayerModalOpen] = useState(false)
+  const [renamePlayerDraft, setRenamePlayerDraft] = useState('')
+
+  const [skillModalOpen, setSkillModalOpen] = useState(false)
+  const [skillModalPlayerId, setSkillModalPlayerId] = useState<string | null>(null)
+  const [skillNameDraft, setSkillNameDraft] = useState('')
+  const skillPromiseResolver = useRef<((id: string | null) => void) | null>(null)
+  const [libraryModalOpen, setLibraryModalOpen] = useState(false)
+  const [libraryConfirm, setLibraryConfirm] = useState(false)
+  const [restoreConfirm, setRestoreConfirm] = useState(false)
 
   const selectedVideo = useMemo(() => videos.find(v => v.id === selectedVideoId) ?? null, [videos, selectedVideoId])
 
@@ -79,13 +93,23 @@ export default function App(): JSX.Element {
     refreshVideos(selectedPlayerId, skillFilter, sortDirection).catch(err => setError(err.message || 'Failed to load videos'))
   }, [selectedPlayerId, skillFilter, sortDirection])
 
-  async function createSkillPrompt(): Promise<string | null> {
-    if (!selectedPlayerId) return null
-    const name = window.prompt('New skill name')
-    if (!name || !name.trim()) return null
-    const created = await window.soccerApi.skills.create(selectedPlayerId, name)
-    await refreshSkills(selectedPlayerId)
+  async function createSkillForPlayer(playerId: string, name: string): Promise<string | null> {
+    if (!name.trim()) return null
+    const created = await window.soccerApi.skills.create(playerId, name)
+    if (selectedPlayerId === playerId || triagePlayerId === playerId) {
+      const list = await window.soccerApi.skills.list(playerId)
+      setSkills(list)
+    }
     return created.id
+  }
+
+  function requestNewSkill(playerId: string): Promise<string | null> {
+    setSkillModalPlayerId(playerId)
+    setSkillNameDraft('')
+    setSkillModalOpen(true)
+    return new Promise(resolve => {
+      skillPromiseResolver.current = resolve
+    })
   }
 
   async function openStartSession(): Promise<void> {
@@ -116,6 +140,7 @@ export default function App(): JSX.Element {
       }
 
       setTriageVideos(result.imported)
+      setTriagePlayerId(sessionDraft.playerId)
       setTriageOpen(true)
       setStartSessionOpen(false)
 
@@ -130,7 +155,7 @@ export default function App(): JSX.Element {
   }
 
   async function applyBatchUpdates(
-    updates: Array<{ id: string; skillId: string | null; starred: number; notes: string }>
+    updates: Array<{ id: string; skillId: string | null; starred: number; notes: string; displayName: string; recordedAt: number }>
   ): Promise<void> {
     for (const update of updates) {
       await window.soccerApi.videos.update(update)
@@ -152,16 +177,21 @@ export default function App(): JSX.Element {
 
   async function saveRetriage(): Promise<void> {
     if (!selectedVideo) return
-    const value = retriageDraft ?? {
-      skillId: selectedVideo.skillId,
-      notes: selectedVideo.notes,
-      starred: selectedVideo.starred
-    }
+    const value =
+      retriageDraft ?? {
+        skillId: selectedVideo.skillId,
+        notes: selectedVideo.notes,
+        starred: selectedVideo.starred,
+        displayName: selectedVideo.displayName,
+        recordedAt: selectedVideo.recordedAt
+      }
     await window.soccerApi.videos.update({
       id: selectedVideo.id,
       skillId: value.skillId,
       notes: value.notes,
-      starred: value.starred
+      starred: value.starred,
+      displayName: value.displayName,
+      recordedAt: value.recordedAt
     })
     setRetriageOpen(false)
     setRetriageDraft(null)
@@ -170,11 +200,84 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function submitAddPlayer(): Promise<void> {
+    if (!playerNameDraft.trim()) return
+    const created = await window.soccerApi.players.create(playerNameDraft)
+    const list = await window.soccerApi.players.list()
+    setPlayers(list)
+    setSelectedPlayerId(created.id)
+    setPlayerModalOpen(false)
+    setPlayerNameDraft('')
+  }
+
+  async function submitRenamePlayer(): Promise<void> {
+    if (!selectedPlayerId || !renamePlayerDraft.trim()) return
+    await window.soccerApi.players.update(selectedPlayerId, renamePlayerDraft.trim())
+    await refreshPlayers(true)
+    setRenamePlayerModalOpen(false)
+    setRenamePlayerDraft('')
+  }
+
+  async function chooseNewLibraryRoot(): Promise<void> {
+    if (!libraryConfirm) return
+    const selected = await window.soccerApi.app.chooseLibraryRoot()
+    if (selected) {
+      setLibraryRoot(selected)
+      setLibraryModalOpen(false)
+      setLibraryConfirm(false)
+    }
+  }
+
+  async function createTransferBackup(): Promise<void> {
+    const backupPath = await window.soccerApi.app.createBackup()
+    if (backupPath) {
+      setError(`Backup created:\n${backupPath}`)
+    }
+  }
+
+  async function restoreTransferBackup(): Promise<void> {
+    if (!restoreConfirm) return
+    const restored = await window.soccerApi.app.restoreBackup()
+    if (restored) {
+      setLibraryRoot(restored.restoredLibraryRoot)
+      if (selectedPlayerId) {
+        await refreshSkills(selectedPlayerId)
+        await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
+      }
+      setError(`Restore complete:\nBackup: ${restored.backupPath}\nLibrary: ${restored.restoredLibraryRoot}`)
+      setRestoreConfirm(false)
+      setLibraryModalOpen(false)
+    }
+  }
+
+  async function submitAddSkill(): Promise<void> {
+    if (!skillModalPlayerId || !skillNameDraft.trim()) return
+    try {
+      const createdId = await createSkillForPlayer(skillModalPlayerId, skillNameDraft)
+      setSkillModalOpen(false)
+      setSkillNameDraft('')
+      setSkillModalPlayerId(null)
+      skillPromiseResolver.current?.(createdId)
+      skillPromiseResolver.current = null
+    } catch (err: any) {
+      setError(err.message || 'Failed to create skill')
+    }
+  }
+
+  function cancelAddSkill(): void {
+    setSkillModalOpen(false)
+    setSkillNameDraft('')
+    setSkillModalPlayerId(null)
+    skillPromiseResolver.current?.(null)
+    skillPromiseResolver.current = null
+  }
+
   if (!libraryRoot) {
     return (
       <div className="onboarding">
         <h1>Soccer Technique Tracker</h1>
         <p>Choose a local Library Root folder to store copied videos and metadata references.</p>
+        <p>Pick a parent location. The app creates a nested <strong>SoccerTechniqueLibrary</strong> folder there.</p>
         <button
           className="btn"
           type="button"
@@ -200,14 +303,15 @@ export default function App(): JSX.Element {
             setSelectedPlayerId(id)
             setSkillFilter('all')
           }}
-          onAddPlayer={async () => {
-            const name = window.prompt('Player name')
-            if (!name || !name.trim()) return
-            await window.soccerApi.players.create(name)
-            await refreshPlayers(false)
+          onAddPlayer={() => {
+            setPlayerNameDraft('')
+            setPlayerModalOpen(true)
           }}
         />
         <div className="topbar-actions">
+          <button className="btn btn-secondary" type="button" onClick={() => setLibraryModalOpen(true)}>
+            Storage
+          </button>
           <button className="btn" type="button" onClick={openStartSession} disabled={!selectedPlayerId}>
             New Session
           </button>
@@ -216,6 +320,24 @@ export default function App(): JSX.Element {
 
       <main className="layout">
         <aside className="sidebar">
+          <div className="sidebar-head">
+            <div className="sidebar-head-label">Selected Player</div>
+            <div className="sidebar-head-name">
+              {players.find(player => player.id === selectedPlayerId)?.name ?? 'None'}
+            </div>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => {
+                const currentName = players.find(player => player.id === selectedPlayerId)?.name ?? ''
+                setRenamePlayerDraft(currentName)
+                setRenamePlayerModalOpen(true)
+              }}
+              disabled={!selectedPlayerId}
+            >
+              Rename Player
+            </button>
+          </div>
           <button
             className={`sidebar-item ${skillFilter === 'all' ? 'active' : ''}`}
             type="button"
@@ -240,7 +362,15 @@ export default function App(): JSX.Element {
               {skill.name}
             </button>
           ))}
-          <button className="btn btn-secondary" type="button" onClick={createSkillPrompt} disabled={!selectedPlayerId}>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={() => {
+              if (!selectedPlayerId) return
+              void requestNewSkill(selectedPlayerId)
+            }}
+            disabled={!selectedPlayerId}
+          >
             + Add Skill
           </button>
         </aside>
@@ -250,7 +380,10 @@ export default function App(): JSX.Element {
             <>
               <video className="video" controls src={window.soccerApi.videos.sourceUrl(selectedVideo.fileRelpath)} />
               <div className="video-meta">
-                <div><strong>{selectedVideo.originalName}</strong></div>
+                <div>
+                  <strong>{selectedVideo.displayName}</strong>
+                </div>
+                <div>File: {selectedVideo.originalName}</div>
                 <div>{new Date(selectedVideo.recordedAt).toLocaleString()}</div>
                 <div>{selectedVideo.skillName ?? 'Unassigned'}</div>
                 <div>{selectedVideo.notes || 'No notes'}</div>
@@ -262,7 +395,9 @@ export default function App(): JSX.Element {
                   setRetriageDraft({
                     skillId: selectedVideo.skillId,
                     starred: selectedVideo.starred,
-                    notes: selectedVideo.notes
+                    notes: selectedVideo.notes,
+                    displayName: selectedVideo.displayName,
+                    recordedAt: selectedVideo.recordedAt
                   })
                   setRetriageOpen(true)
                 }}
@@ -297,8 +432,9 @@ export default function App(): JSX.Element {
               >
                 <div className="video-icon">▶</div>
                 <div className="video-row-main">
-                  <div className="video-row-title">{video.originalName}</div>
+                  <div className="video-row-title">{video.displayName}</div>
                   <div className="video-row-meta">{new Date(video.recordedAt).toLocaleString()}</div>
+                  <div className="video-row-meta">{video.originalName}</div>
                   <div className="video-row-notes">{video.notes || 'No notes'}</div>
                 </div>
                 <div className="video-row-star">{video.starred ? '★' : '☆'}</div>
@@ -372,7 +508,7 @@ export default function App(): JSX.Element {
         open={triageOpen}
         importedVideos={triageVideos}
         skills={skills}
-        onCreateSkill={createSkillPrompt}
+        onCreateSkill={name => (triagePlayerId ? createSkillForPlayer(triagePlayerId, name) : Promise.resolve(null))}
         onClose={async () => {
           setTriageOpen(false)
           if (selectedPlayerId) {
@@ -390,12 +526,14 @@ export default function App(): JSX.Element {
             <VideoLabelEditor
               skills={skills}
               notesRef={notesRef}
-              onCreateSkill={createSkillPrompt}
+              onCreateSkill={name => createSkillForPlayer(selectedVideo.playerId, name)}
               value={
                 retriageDraft ?? {
                   skillId: selectedVideo.skillId,
                   starred: selectedVideo.starred,
-                  notes: selectedVideo.notes
+                  notes: selectedVideo.notes,
+                  displayName: selectedVideo.displayName,
+                  recordedAt: selectedVideo.recordedAt
                 }
               }
               onChange={setRetriageDraft}
@@ -413,6 +551,119 @@ export default function App(): JSX.Element {
               </button>
               <button className="btn" type="button" onClick={() => void saveRetriage()}>
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {playerModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal small-modal">
+            <h2>Add Player</h2>
+            <label className="field">
+              <span>Player Name</span>
+              <input className="input" value={playerNameDraft} onChange={e => setPlayerNameDraft(e.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setPlayerModalOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn" type="button" onClick={() => void submitAddPlayer()}>
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renamePlayerModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal small-modal">
+            <h2>Rename Player</h2>
+            <label className="field">
+              <span>Player Name</span>
+              <input className="input" value={renamePlayerDraft} onChange={e => setRenamePlayerDraft(e.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setRenamePlayerModalOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn" type="button" onClick={() => void submitRenamePlayer()}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {libraryModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h2>Storage Location</h2>
+            <div className="field">
+              <span>Current Location</span>
+              <div className="mono-line">{libraryRoot ?? 'Not set'}</div>
+            </div>
+            <div className="field">
+              <span>
+                Choose where local player/video data should live. The app will create a nested folder named
+                <strong> SoccerTechniqueLibrary</strong>.
+              </span>
+            </div>
+            <label className="field-inline">
+              <input type="checkbox" checked={libraryConfirm} onChange={e => setLibraryConfirm(e.target.checked)} />
+              <span>I understand this copies current library data to the newly selected location.</span>
+            </label>
+            <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => {
+                  setLibraryModalOpen(false)
+                  setLibraryConfirm(false)
+                }}
+              >
+                Cancel
+              </button>
+              <button className="btn" type="button" disabled={!libraryConfirm} onClick={() => void chooseNewLibraryRoot()}>
+                Choose Parent Folder
+              </button>
+            </div>
+            <hr />
+            <h3>Machine Transfer</h3>
+            <div className="modal-actions left-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => void createTransferBackup()}>
+                Create Backup Bundle
+              </button>
+            </div>
+            <label className="field-inline">
+              <input type="checkbox" checked={restoreConfirm} onChange={e => setRestoreConfirm(e.target.checked)} />
+              <span>Restore overwrites app metadata (players/skills/videos) from a chosen backup.</span>
+            </label>
+            <div className="modal-actions left-actions">
+              <button className="btn" type="button" disabled={!restoreConfirm} onClick={() => void restoreTransferBackup()}>
+                Restore From Backup Bundle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {skillModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal small-modal">
+            <h2>Add Skill</h2>
+            <label className="field">
+              <span>Skill Name</span>
+              <input className="input" value={skillNameDraft} onChange={e => setSkillNameDraft(e.target.value)} autoFocus />
+            </label>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={cancelAddSkill}>
+                Cancel
+              </button>
+              <button className="btn" type="button" onClick={() => void submitAddSkill()}>
+                Create
               </button>
             </div>
           </div>

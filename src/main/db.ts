@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import type { Player, Session, Skill, Video, VideoWithSkillName } from '@shared/types'
-import { makeId, nowMs, slugify } from './utils'
+import { makeId, nowMs, shortId, slugify } from './utils'
 
 export interface AppDb {
   db: Database.Database
@@ -12,6 +12,7 @@ export interface AppDb {
   setSetting(key: string, value: string): void
   players: {
     list(): Player[]
+    getById(id: string): Player | null
     create(name: string): Player
     update(id: string, name: string): Player
     delete(id: string): void
@@ -31,13 +32,21 @@ export interface AppDb {
     list(playerId: string, skillFilter: 'all' | 'unassigned' | string, sortDirection: 'asc' | 'desc'): VideoWithSkillName[]
     create(row: Video): Video
     getById(id: string): Video | null
-    update(id: string, patch: Partial<Pick<Video, 'skillId' | 'starred' | 'notes' | 'fileRelpath'>>): Video
+    update(
+      id: string,
+      patch: Partial<Pick<Video, 'skillId' | 'starred' | 'notes' | 'fileRelpath' | 'displayName' | 'recordedAt' | 'sortKey'>>
+    ): Video
     delete(id: string): void
   }
 }
 
+function makePlayerStorageKey(name: string, id: string): string {
+  const base = slugify(name) || 'player'
+  return `${base}-${shortId(id).slice(0, 4)}`
+}
+
 function mapPlayer(row: any): Player {
-  return { id: row.id, name: row.name, createdAt: row.created_at }
+  return { id: row.id, name: row.name, storageKey: row.storage_key, createdAt: row.created_at }
 }
 
 function mapSkill(row: any): Skill {
@@ -67,6 +76,7 @@ function mapVideo(row: any): Video {
     sessionId: row.session_id,
     fileRelpath: row.file_relpath,
     originalName: row.original_name,
+    displayName: row.display_name ?? row.original_name,
     recordedAt: row.recorded_at,
     importedAt: row.imported_at,
     starred: row.starred,
@@ -88,6 +98,7 @@ export function createDb(userDataPath: string): AppDb {
         CREATE TABLE IF NOT EXISTS players (
           id TEXT PRIMARY KEY,
           name TEXT NOT NULL,
+          storage_key TEXT,
           created_at INTEGER NOT NULL
         );
 
@@ -116,6 +127,7 @@ export function createDb(userDataPath: string): AppDb {
           session_id TEXT NULL,
           file_relpath TEXT NOT NULL,
           original_name TEXT NOT NULL,
+          display_name TEXT,
           recorded_at INTEGER NOT NULL,
           imported_at INTEGER NOT NULL,
           starred INTEGER NOT NULL DEFAULT 0,
@@ -136,6 +148,26 @@ export function createDb(userDataPath: string): AppDb {
         CREATE INDEX IF NOT EXISTS idx_videos_recorded_at ON videos(recorded_at);
         CREATE INDEX IF NOT EXISTS idx_videos_starred ON videos(starred);
       `)
+
+      const playerCols = db.prepare('PRAGMA table_info(players)').all() as Array<{ name: string }>
+      if (!playerCols.some(col => col.name === 'storage_key')) {
+        db.exec('ALTER TABLE players ADD COLUMN storage_key TEXT')
+      }
+
+      const videoCols = db.prepare('PRAGMA table_info(videos)').all() as Array<{ name: string }>
+      if (!videoCols.some(col => col.name === 'display_name')) {
+        db.exec('ALTER TABLE videos ADD COLUMN display_name TEXT')
+      }
+
+      const missingPlayerKeys = db
+        .prepare('SELECT id, name FROM players WHERE storage_key IS NULL OR storage_key = ""')
+        .all() as Array<{ id: string; name: string }>
+      const setPlayerKey = db.prepare('UPDATE players SET storage_key = ? WHERE id = ?')
+      for (const row of missingPlayerKeys) {
+        setPlayerKey.run(makePlayerStorageKey(row.name, row.id), row.id)
+      }
+
+      db.exec('UPDATE videos SET display_name = original_name WHERE display_name IS NULL OR display_name = ""')
     },
 
     seedDemoIfEmpty() {
@@ -166,11 +198,23 @@ export function createDb(userDataPath: string): AppDb {
         return rows.map(mapPlayer)
       },
 
+      getById(id: string) {
+        const row = db.prepare('SELECT * FROM players WHERE id = ?').get(id)
+        return row ? mapPlayer(row) : null
+      },
+
       create(name: string) {
         const id = makeId()
         const createdAt = nowMs()
-        db.prepare('INSERT INTO players(id, name, created_at) VALUES (?, ?, ?)').run(id, name.trim(), createdAt)
-        return { id, name: name.trim(), createdAt }
+        const trimmed = name.trim()
+        const storageKey = makePlayerStorageKey(trimmed, id)
+        db.prepare('INSERT INTO players(id, name, storage_key, created_at) VALUES (?, ?, ?, ?)').run(
+          id,
+          trimmed,
+          storageKey,
+          createdAt
+        )
+        return { id, name: trimmed, storageKey, createdAt }
       },
 
       update(id: string, name: string) {
@@ -200,9 +244,7 @@ export function createDb(userDataPath: string): AppDb {
         const base = slugify(trimmed)
         let slug = base
         let suffix = 1
-        while (
-          db.prepare('SELECT 1 FROM skills WHERE player_id = ? AND slug = ?').get(playerId, slug)
-        ) {
+        while (db.prepare('SELECT 1 FROM skills WHERE player_id = ? AND slug = ?').get(playerId, slug)) {
           suffix += 1
           slug = `${base}-${suffix}`
         }
@@ -267,9 +309,7 @@ export function createDb(userDataPath: string): AppDb {
       },
 
       list(playerId: string) {
-        const rows = db
-          .prepare('SELECT * FROM sessions WHERE player_id = ? ORDER BY started_at DESC')
-          .all(playerId)
+        const rows = db.prepare('SELECT * FROM sessions WHERE player_id = ? ORDER BY started_at DESC').all(playerId)
         return rows.map(mapSession)
       }
     },
@@ -302,8 +342,8 @@ export function createDb(userDataPath: string): AppDb {
         db.prepare(`
           INSERT INTO videos(
             id, player_id, skill_id, session_id, file_relpath, original_name,
-            recorded_at, imported_at, starred, notes, sort_key
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            display_name, recorded_at, imported_at, starred, notes, sort_key
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           row.id,
           row.playerId,
@@ -311,6 +351,7 @@ export function createDb(userDataPath: string): AppDb {
           row.sessionId,
           row.fileRelpath,
           row.originalName,
+          row.displayName,
           row.recordedAt,
           row.importedAt,
           row.starred,
@@ -325,7 +366,10 @@ export function createDb(userDataPath: string): AppDb {
         return row ? mapVideo(row) : null
       },
 
-      update(id: string, patch: Partial<Pick<Video, 'skillId' | 'starred' | 'notes' | 'fileRelpath'>>) {
+      update(
+        id: string,
+        patch: Partial<Pick<Video, 'skillId' | 'starred' | 'notes' | 'fileRelpath' | 'displayName' | 'recordedAt' | 'sortKey'>>
+      ) {
         const current = db.prepare('SELECT * FROM videos WHERE id = ?').get(id) as any
         if (!current) throw new Error('Video not found')
 
@@ -336,14 +380,22 @@ export function createDb(userDataPath: string): AppDb {
           Object.prototype.hasOwnProperty.call(patch, 'fileRelpath') && patch.fileRelpath
             ? patch.fileRelpath
             : current.file_relpath
+        const displayName =
+          Object.prototype.hasOwnProperty.call(patch, 'displayName') && patch.displayName
+            ? patch.displayName.trim()
+            : current.display_name ?? current.original_name
+        const recordedAt =
+          Object.prototype.hasOwnProperty.call(patch, 'recordedAt') && typeof patch.recordedAt === 'number'
+            ? patch.recordedAt
+            : current.recorded_at
+        const sortKey =
+          Object.prototype.hasOwnProperty.call(patch, 'sortKey') && typeof patch.sortKey === 'number'
+            ? patch.sortKey
+            : recordedAt
 
-        db.prepare('UPDATE videos SET skill_id = ?, starred = ?, notes = ?, file_relpath = ? WHERE id = ?').run(
-          skillId,
-          starred,
-          notes,
-          fileRelpath,
-          id
-        )
+        db.prepare(
+          'UPDATE videos SET skill_id = ?, starred = ?, notes = ?, file_relpath = ?, display_name = ?, recorded_at = ?, sort_key = ? WHERE id = ?'
+        ).run(skillId, starred, notes, fileRelpath, displayName, recordedAt, sortKey, id)
 
         const row = db.prepare('SELECT * FROM videos WHERE id = ?').get(id)
         if (!row) throw new Error('Video not found')

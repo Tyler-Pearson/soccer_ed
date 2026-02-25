@@ -4,7 +4,9 @@ import type { FilePickOptions, ImportBatchInput, ListVideosInput, SoccerApi, Vid
 const api: SoccerApi = {
   app: {
     getLibraryRoot: () => ipcRenderer.invoke('app:getLibraryRoot'),
-    chooseLibraryRoot: () => ipcRenderer.invoke('app:chooseLibraryRoot')
+    chooseLibraryRoot: () => ipcRenderer.invoke('app:chooseLibraryRoot'),
+    createBackup: () => ipcRenderer.invoke('app:createBackup'),
+    restoreBackup: () => ipcRenderer.invoke('app:restoreBackup')
   },
 
   players: {

@@ -31,7 +31,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   const db = createDb(app.getPath('userData'))
   registerVideoProtocol(db)
-  registerIpc(db)
+  registerIpc(db, app.getVersion())
   createWindow()
 
   app.on('activate', () => {
