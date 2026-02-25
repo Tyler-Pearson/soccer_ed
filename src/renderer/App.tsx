@@ -32,6 +32,7 @@ export default function App(): JSX.Element {
 
   const [retriageOpen, setRetriageOpen] = useState(false)
   const [retriageDraft, setRetriageDraft] = useState<LabelState | null>(null)
+  const [deleteVideoOpen, setDeleteVideoOpen] = useState(false)
   const notesRef = useRef<HTMLTextAreaElement>(null)
 
   const [playerModalOpen, setPlayerModalOpen] = useState(false)
@@ -211,6 +212,13 @@ export default function App(): JSX.Element {
     if (selectedPlayerId) {
       await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
     }
+  }
+
+  async function deleteSelectedVideo(): Promise<void> {
+    if (!selectedVideo || !selectedPlayerId) return
+    await window.soccerApi.videos.delete(selectedVideo.id)
+    setDeleteVideoOpen(false)
+    await refreshVideos(selectedPlayerId, skillFilter, sortDirection)
   }
 
   async function submitAddPlayer(): Promise<void> {
@@ -409,7 +417,9 @@ export default function App(): JSX.Element {
                 <div>File: {selectedVideo.originalName}</div>
                 <div>{new Date(selectedVideo.recordedAt).toLocaleString()}</div>
                 <div>{selectedVideo.skillName ?? 'Unassigned'}</div>
-                <div className="video-note-strong">{selectedVideo.notes || 'No notes'}</div>
+                <div className={selectedVideo.notes ? 'video-note-strong' : 'video-note-empty'}>
+                  {selectedVideo.notes || 'No notes'}
+                </div>
                 {videoLoadError ? (
                   <div className="video-note-error">
                     Video file could not be loaded. This record may still point to an older storage location.
@@ -431,6 +441,9 @@ export default function App(): JSX.Element {
                 }}
               >
                 Re-triage
+              </button>
+              <button className="btn btn-danger" type="button" onClick={() => setDeleteVideoOpen(true)}>
+                Delete Video
               </button>
             </>
           ) : (
@@ -463,7 +476,9 @@ export default function App(): JSX.Element {
                   <div className="video-row-title">{video.displayName}</div>
                   <div className="video-row-meta">{new Date(video.recordedAt).toLocaleString()}</div>
                   <div className="video-row-meta">{video.originalName}</div>
-                  <div className="video-row-notes">{video.notes || 'No notes'}</div>
+                  <div className={video.notes ? 'video-row-notes' : 'video-row-notes-empty'}>
+                    {video.notes || 'No notes'}
+                  </div>
                 </div>
                 <div className="video-row-star">{video.starred ? '★' : '☆'}</div>
               </button>
@@ -581,6 +596,28 @@ export default function App(): JSX.Element {
               </button>
               <button className="btn" type="button" onClick={() => void saveRetriage()}>
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteVideoOpen && selectedVideo && (
+        <div className="modal-backdrop">
+          <div className="modal small-modal">
+            <h2>Delete Video</h2>
+            <div>This permanently deletes the video file and metadata record.</div>
+            <div className="field">
+              <span>Video</span>
+              <div className="mono-line">{selectedVideo.displayName}</div>
+              <div className="mono-line">{selectedVideo.originalName}</div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => setDeleteVideoOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" type="button" onClick={() => void deleteSelectedVideo()}>
+                Delete
               </button>
             </div>
           </div>

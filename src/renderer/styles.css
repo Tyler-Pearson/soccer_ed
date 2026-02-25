@@ -138,6 +138,12 @@ textarea {
   padding: 6px 8px;
 }
 
+.video-note-empty {
+  color: #9eb1bc;
+  font-size: 12px;
+  font-style: italic;
+}
+
 .video-note-error {
   color: var(--danger);
   font-size: 12px;
@@ -197,6 +203,12 @@ textarea {
   font-weight: 600;
 }
 
+.video-row-notes-empty {
+  color: #a5b3bc;
+  font-size: 12px;
+  font-style: italic;
+}
+
 .btn {
   border: 1px solid transparent;
   border-radius: 8px;
@@ -215,6 +227,11 @@ textarea {
   background: #f6fafb;
   color: var(--text);
   border-color: var(--line);
+}
+
+.btn-danger {
+  background: #c1121f;
+  color: #fff;
 }
 
 .input,
